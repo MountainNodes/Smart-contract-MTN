@@ -1,0 +1,325 @@
+const Mountain = artifacts.require("Mountain");
+const { time, BN } = require('@openzeppelin/test-helpers');
+const { assertion } = require('@openzeppelin/test-helpers/src/expectRevert');
+const Pair = artifacts.require('Pair.sol');
+const Router = artifacts.require('Router.sol');
+
+contract("Simulation", async accounts => {
+
+
+    let owner = accounts[0];
+    let alice = accounts[1];
+    let bob = accounts[2];
+    let rewardPool = accounts[3];
+    let treasuryPool = accounts[4];    
+
+	let MountainToken;
+    let router;
+    let pair;
+
+    
+
+    beforeEach('should setup the contract smart_contract', async () => {
+
+        MountainToken = await Mountain.deployed();
+        await MountainToken.setRewardPool(rewardPool);
+        await MountainToken.setTreasuryPool(treasuryPool);   
+        
+        // Add initial liquidity
+        const pair_address = await MountainToken.traderJoePair.call();  
+        pair = await Pair.at(pair_address);
+
+        router = await Router.at('0x60aE616a2155Ee3d9A68541Ba4544862310933d4');
+    
+        
+        // Owner adds liquidity => Need to approve
+        await MountainToken.approve.sendTransaction(router.address, "10000000000000000000000",
+        							{
+        					            from: owner,
+        					            gas: 4000000,
+              						});
+            
+        console.log('erc20 approved');       
+            
+    
+        
+        // Owner adds liquidity 1AVAX, 10000 token
+        await router.addLiquidityAVAX(
+        				MountainToken.address,
+        		        "1000000000000000000000",
+        	            "0",
+                        "0", 
+        		        owner,
+        		        Math.floor(Date.now() / 1000) + 60 * 10,
+        		        {
+        		            from: owner,
+        		            gas: 4000000,
+                			value: "10000000000000000000"
+          				});
+         console.log('liquidity added');
+            
+        
+        // Get the balance of LP of the owner
+        balance = await pair.balanceOf(owner); 
+        console.log(`balance LP: ${balance.toString()}`); 
+                
+        
+      });
+
+    // it(" tests name", async () => {
+       
+    //     name = await MountainToken.name();
+    //     assert.equal(name, "Mountain")
+    // });
+    
+    // it(" tests symbol", async () => {
+       
+    //     symbol = await smart_contract.symbol();
+    //     assert.equal(symbol, "MTN")
+    // });
+    
+    // it(" tests supply", async () => {
+       
+    //     totalSupply = await smart_contract.totalSupply();
+    //     assert.equal(totalSupply, "5000000000000000000000000")
+    // });   
+
+
+
+    // it(" tests initial balances", async () => {
+       
+    //     balance = await smart_contract.balanceOf(smart_contract.address)
+    //     assert.equal(balance, "500000000000000000000000")
+    
+    //     balance = await smart_contract.balanceOf(owner)
+    //     assert.equal(balance, "500000000000000000000000")
+
+
+    //     balance = await smart_contract.balanceOf(rewardPool)
+    //     assert.equal(balance, "3500000000000000000000000")
+        
+    //     balance = await smart_contract.balanceOf(treasuryPool)
+    //     assert.equal(balance, "500000000000000000000000")
+    // });   
+
+
+    async function buyMNT(buyer, tokenAmount) {
+    
+    	   
+	    var path = new Array(2);
+
+        
+
+        path[0] = await router.WAVAX(); 
+        path[1] = MountainToken.address;
+
+
+	    
+	    var amounts = await router.getAmountsIn.call(tokenAmount, path);
+		var necessaryAVAX = parseInt(amounts[0].valueOf()).toString();
+	     
+        
+		await router.swapAVAXForExactTokens(
+			tokenAmount,
+	        path,
+            buyer,
+            Math.floor(Date.now() / 1000) + 60 * 10, {
+            	from: buyer,
+            	value: necessaryAVAX+1 // Add one to avoid EXCESSIVE_INPUT_AMOUNT error 
+            });    
+    
+    } 
+
+    it("Alice buys token on TraderJoe", async() => {
+
+		
+		balance = await MountainToken.balanceOf.call(alice);
+		console.log(`Balance of alice before : ${parseInt(balance.valueOf()).toString()}`); 
+		
+		
+        // 5 MNT
+		var MNT_to_buy = "5000000000000000000";
+		await buyMNT(alice, MNT_to_buy);
+		
+    		
+
+		balance = await MountainToken.balanceOf.call(alice);
+		console.log(`Balance of alice after : ${parseInt(balance.valueOf()).toString()}`);  
+
+    });  
+
+
+    it(" Alice creates a node of type 1 (Lava)", async () => {
+           
+
+        balance = await MountainToken.balanceOf(alice)
+        console.log(`Alice balance before : ${balance.toString()}`); 
+
+        let priceTobePaid = new BN(web3.utils.toWei('5', 'ether'))
+
+    
+        await MountainToken.createNodeAndTransferToPools.sendTransaction(priceTobePaid, 0, {
+            from: alice,
+            gas: 4000000,
+          });
+
+        balance = await MountainToken.balanceOf(alice)
+        console.log(`Alice balance after : ${balance.toString()}`); 
+
+    });  
+    
+    
+    it("Bob buys token on TraderJoe and create a node of type 3", async() => {
+
+		
+
+        // 5 MNT
+		var MNT_to_buy = "100000000000000000000";
+		await buyMNT(bob, MNT_to_buy);
+
+    
+        await MountainToken.createNodeAndTransferToPools.sendTransaction(MNT_to_buy, 2, {
+            from: bob,
+            gas: 4000000,
+          });        
+
+    });  
+
+
+
+
+
+
+
+    // it(" performs simple transfers", async () => {
+           
+    //     let amount_to_alice = new BN("5000000000000000000")
+    
+    //     await smart_contract.transfer.sendTransaction(alice, amount_to_alice, {
+    //         from: owner,
+    //         gas: 4000000,
+    //       });
+
+    //     let amount_to_bob = new BN("25000000000000000000")
+
+
+    //     await smart_contract.transfer.sendTransaction(bob, amount_to_bob, {
+    //         from: owner,
+    //         gas: 4000000,
+    //     });          
+
+
+    //     balance = await smart_contract.balanceOf(alice)
+    //     assert.equal(balance, "5000000000000000000")
+
+    //     balance = await smart_contract.balanceOf(bob)
+    //     assert.equal(balance, "25000000000000000000")
+
+    
+    // }); 
+
+
+    // it(" checks the node price", async () => {
+    
+    //     shouldBePrices = ["5000000000000000000", 
+    //                       "25000000000000000000",
+    //                       "100000000000000000000"]
+    //     for (let i=0;i<3;i++) {
+    //         nodePrice = await smart_contract.getNodePrice(i)
+    //         assert.equal(nodePrice, shouldBePrices[i])
+    //     }
+    
+    // }); 
+
+
+    // it(" Alice creates a node of type 1 (Lava)", async () => {
+           
+
+    //     balance = await smart_contract.balanceOf(alice)
+    //     console.log(`Alice balance before : ${balance.toString()}`); 
+
+    //     let priceTobePaid = new BN("5000000000000000000")
+    
+    //     await smart_contract.createNodeAndTransferToPools.sendTransaction(priceTobePaid, 0, {
+    //         from: alice,
+    //         gas: 4000000,
+    //       });
+
+    //     balance = await smart_contract.balanceOf(alice)
+    //     console.log(`Alice balance after : ${balance.toString()}`); 
+
+    // });
+
+
+    // it(" Bob creates a node of type 2 (Snow)", async () => {
+           
+        
+
+    //     balance = await smart_contract.balanceOf(bob)
+    //     console.log(`Bob balance before : ${balance.toString()}`); 
+
+    
+
+    //     let priceTobePaid = new BN("25000000000000000000")
+    
+    //     await smart_contract.createNodeAndTransferToPools.sendTransaction(priceTobePaid, 1, {
+    //         from: bob,
+    //         gas: 4000000,
+    //     });
+
+
+    //     balance = await smart_contract.balanceOf(bob)
+    //     console.log(`Bob balance after : ${balance.toString()}`); 
+
+    
+    // });    
+
+
+    // it("checks main accounts", async() => {
+
+    //     balance = await smart_contract.balanceOf(smart_contract.address)
+    //     console.log(`SC balance : ${balance.toString()}`); 
+    
+    //     balance = await smart_contract.balanceOf(owner)
+    //     console.log(`Owner balance : ${balance.toString()}`); 
+        
+    //     balance = await smart_contract.balanceOf(rewardPool)
+    //     console.log(`Reward pool balance : ${balance.toString()}`);  
+        
+    //     balance = await smart_contract.balanceOf(treasuryPool)
+    //     console.log(`Treasury pool balance : ${balance.toString()}`);     
+    // })
+    
+    // it(" gets node information", async () => {
+           
+
+    //     await time.increase(60*60*24);
+
+
+
+    //     numberOfNodes = await smart_contract.numberOfNodes()
+    //     accountNodes = await smart_contract.accountNodes(alice,0)
+    //     nodeMapping = await smart_contract.getMountainNodeById(accountNodes)
+    //     nodeReward = await smart_contract.calculateRewards(accountNodes)
+
+
+
+
+    //     console.log(`numberOfNodes : ${numberOfNodes}`); 
+    //     console.log(`accountNodes : ${accountNodes}`); 
+    //     console.log(`nodeMapping : ${nodeMapping}`); 
+    //     console.log(`nodeReward : ${nodeReward}`); 
+
+    
+    // });     
+
+
+   
+
+
+
+    
+    
+    
+});
+
