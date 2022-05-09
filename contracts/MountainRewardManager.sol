@@ -7,6 +7,7 @@ import "./Ownable.sol";
 
 
 
+
 contract MountainRewardManager is Ownable {
 
     // Total number of nodes
@@ -43,7 +44,7 @@ contract MountainRewardManager is Ownable {
     mapping(address => bytes20) private referrals;
 
     // Mapping that allows to retrive the address of a user from the referral id
-    mapping(bytes20 => address) internal getAddressFromReferral;    
+    mapping(bytes20 => address) public getAddressFromReferral;    // Note : for testing purposes only => internal
 
     // Mapping that stores the Node structure for given node identifiers
     mapping(uint256 => MountainNode) public nodeMapping;
@@ -61,7 +62,7 @@ contract MountainRewardManager is Ownable {
         
         @dev This is the main function to create a node
     */ 
-    function createNode(uint256 _amount, uint256 _nodeType) internal returns (bytes20) { 
+    function createNode(uint256 _amount, uint256 _nodeType) internal { 
 
         address sender = _msgSender();
 
@@ -100,12 +101,23 @@ contract MountainRewardManager is Ownable {
 
         // Create a referral code if this is the first time the user create a node
         if (referrals[sender] == 0) {
-            referrals[sender] = createReferralCode(sender);
+            bytes20 referral_code = createReferralCode(sender);
+            referrals[sender] = referral_code;
+            getAddressFromReferral[referral_code] = sender;
+
         }
 
-        return referrals[sender];
-
     }
+
+
+    /** 
+        @param user : The address of the user
+        @return  bytes20 : The referral code for the address 
+    */ 
+    function getReferralCode(address user) external view onlyOwner returns(bytes20) { 
+        return referrals[user];
+    }
+
 
 
 
@@ -139,7 +151,7 @@ contract MountainRewardManager is Ownable {
     function getNodeReward(uint256 _id) internal returns(uint256){
 
         // Retrieve the Node structure given its id 
-        MountainNode memory mountaintNode = getMountainNodeById(_id);
+        MountainNode memory mountaintNode = nodeMapping[_id];
 
         // Revert if the caller isn't the owner of the Node
         require(_msgSender() == mountaintNode.owner, "Must be owner of node to claim");
@@ -167,7 +179,7 @@ contract MountainRewardManager is Ownable {
     function calculateRewards(uint256 _id) public view returns (uint256) {
 
         // Retrieve the Node structure given its id 
-        MountainNode memory mountainNode = getMountainNodeById(_id);
+        MountainNode memory mountainNode = nodeMapping[_id];
 
 
         // The formula to calculate the rewards is easy, and similar to staking SCs. 
@@ -206,14 +218,6 @@ contract MountainRewardManager is Ownable {
     }
 
 
-    /** 
-        @param _id : The identifier of the node  
-        
-        @dev This function is public so that it's not only called internally, but also as a query if needed.
-    */ 
-    function getMountainNodeById(uint256 _id) public view returns (MountainNode memory){ 
-        return nodeMapping[_id];
-    }
 
     /** 
         @param node_type : The node type (Lava, Earth or Snow). Must be between 0 and 2 

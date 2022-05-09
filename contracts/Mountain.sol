@@ -14,6 +14,8 @@ import "./MountainRewardManager.sol";
 
 
 
+
+
 contract Mountain is ARC20, MountainRewardManager {
 
     // In the constructor competitors usually provide :
@@ -21,7 +23,7 @@ contract Mountain is ARC20, MountainRewardManager {
     // _ Initial balances of tokens for those pools
     
 
-    // A setLiquidityPool function (with an array) like in PolarNodes ?
+    // A setlpPool function (with an array) like in PolarNodes ?
 
     // Later : Need to take into account the presale tokens
 
@@ -43,7 +45,7 @@ contract Mountain is ARC20, MountainRewardManager {
     address public treasuryPool;
     address public rewardPool; 
     address public teamPool; 
-    address public liquidityPool; // Todo: do we need an address for the LP tokens ? 
+    address public lpPool; // Todo: do we need an address for the LP tokens ? 
 
 	mapping(address => bool) private _isPool;
 
@@ -67,7 +69,7 @@ contract Mountain is ARC20, MountainRewardManager {
     uint32 public teamFee = 50; // 5% 
     uint32 public totalCreationFees = liquidityFee + rewardFee + treasuryFee + teamFee;
 
-    uint32 public rewardSwapRatio = 25; // 2.5% TODO : check if necessary
+    uint32 public rewardSwapRatio = 25; // 2.5%  Note : a bit of AVAX if necessary
 
     // Claim and sell fees
     uint32 public claimFee = 50; // 5%
@@ -93,11 +95,9 @@ contract Mountain is ARC20, MountainRewardManager {
 
     ITraderJoeRouter private traderJoeRouter;
     address public traderJoePair;
-    address public traderJoePairTest;
 
     //address private traderJoeRouterAddress = 0x60aE616a2155Ee3d9A68541Ba4544862310933d4; // TraderJoe MainNet
-    //address private traderJoeRouterAddress = 0x5db0735cf88F85E78ed742215090c465979B5006; // TraderJoe testnet TODO : change this
-    address private traderJoeRouterAddress = 0x2D99ABD9008Dc933ff5c0CD271B88309593aB921;   // Pangolin testnet
+    address private traderJoeRouterAddress = 0x5db0735cf88F85E78ed742215090c465979B5006; // TraderJoe testnet TODO : change this
     
 
     bool public swapping = false;
@@ -115,12 +115,12 @@ contract Mountain is ARC20, MountainRewardManager {
     uint256 private maxTx = 500 * (10 ** _decimals);
     uint256 private maxWallet = 4_000 * (10 ** _decimals);
 
-   	bool private tradingOpen = true; // TODO : Need to change this before launching (set to true for testing purposes)
+   	bool private tradingOpen = false; // TODO : Need set it to true before launching (set to true for testing purposes)
 
     // List of blacklisted malicious addresses (opportunists that try to buy before trading actually opened)
     mapping(address => bool) public _isBlacklisted;
 
-    // Mapping that for whitelisted to create a free node
+    // Mapping for whitelisted to create a free node
     mapping(address => bool) public _isWhitelisted; 
 
     //-----------------------------------------------------\\
@@ -149,15 +149,21 @@ contract Mountain is ARC20, MountainRewardManager {
 
    constructor(address[] memory addresses) ARC20(_symbol, _name)  {
 
+        // Instantiate a TraderJoe router with current address traderJoeRouterAddress
+        traderJoeRouter = ITraderJoeRouter(traderJoeRouterAddress);
+
+        // Create a TraderJoe pair for MTN token
+        traderJoePair = ITraderJoeFactory(traderJoeRouter.factory()).createPair(address(this), traderJoeRouter.WAVAX()); 
+
      
         rewardPool = addresses[0];
         treasuryPool = addresses[1];
-        liquidityPool = addresses[2];
+        lpPool = addresses[2];
         teamPool = addresses[3];
 
         setIsPool(rewardPool, true);
         setIsPool(treasuryPool, true);
-        setIsPool(liquidityPool, true);
+        setIsPool(lpPool, true);
         setIsPool(teamPool, true);
 
 
@@ -174,16 +180,11 @@ contract Mountain is ARC20, MountainRewardManager {
     /** 
         @dev Create pair function : The pair MTN-AVAX is created for the first time on TraderJoe
     */
-    function createPair() external onlyOwner {
+    //function createPair() external onlyOwner {
 
-        // Instantiate a TraderJoe router with current address traderJoeRouterAddress
-        traderJoeRouter = ITraderJoeRouter(traderJoeRouterAddress);
-
-        // Create a TraderJoe pair for MTN token
-        traderJoePair = ITraderJoeFactory(traderJoeRouter.factory()).createPair(address(this), traderJoeRouter.WAVAX()); 
 
         // TODO : find a check that the pair was created and make a required in the functions that uses it
-    } 
+    //} 
 
 
     /** 
@@ -231,7 +232,7 @@ contract Mountain is ARC20, MountainRewardManager {
         @param walletAddress : The new wallet address for the pool that holds the LP tokens
     */      
     function updateLiquidityWallet(address payable walletAddress) external onlyOwner { 
-        liquidityPool = walletAddress; 
+        lpPool = walletAddress; 
     }   
 
 
@@ -244,42 +245,29 @@ contract Mountain is ARC20, MountainRewardManager {
 
 
     /** 
-        @param value : The new fee for the reward pool when a new node is created
+        @param _rewardFee : The new fee for the reward pool when a new node is created
+        @param _treasuryFee : The new fee for the treasury pool when a new node is created
+        @param _liquidityFee : The new fee for the liquidity pool when a new node is created
+        @param _teamFee : The new fee for the team pool when a new node is created
+        
         @notice The max value for 100% is 1_000, i.e. 100 is 10%
+        @dev The sum of all fees should equal 1_000 (100%)
     */  
-    function updateRewardsFee(uint32 value) external onlyOwner {
-        rewardFee = value;
-        totalCreationFees = rewardFee+liquidityFee+treasuryFee;
+    function updateMultiswapFee(uint32 _rewardFee, 
+                                uint32 _treasuryFee, 
+                                uint32 _liquidityFee, 
+                                uint32 _teamFee) external onlyOwner {
+
+        rewardFee = _rewardFee;
+        treasuryFee = _treasuryFee;
+        liquidityFee = _liquidityFee;
+        teamFee = _teamFee;
+
+        totalCreationFees = rewardFee+liquidityFee+treasuryFee+teamFee;
+
+        require(totalCreationFees==PER_MILLE, "Update Fee: The sum of all fees is not equal to 1_000");
     }
 
-
-    /** 
-        @param value : The new fee for the LP pool when a new node is created
-        @notice The max value for 100% is 1_000, i.e. 100 is 10%
-    */  
-    function updateLiquiditFee(uint32 value) external onlyOwner {
-        liquidityFee = value;
-        totalCreationFees = rewardFee+liquidityFee+treasuryFee;
-    }
-
-
-    /** 
-        @param value : The new fee for the team pool when a new node is created
-        @notice The max value for 100% is 1_000, i.e. 100 is 10%
-    */  
-    function updateTeamFee(uint32 value) external onlyOwner {
-        liquidityFee = value;
-        totalCreationFees = rewardFee+liquidityFee+treasuryFee;
-    }
-
-    /** 
-        @param value : The new fee for the treasury pool when a new node is created
-        @notice The max value for 100% is 1_000, i.e. 100 is 10%
-    */  
-    function updateTreasuryFee(uint32 value) external onlyOwner {
-        treasuryFee = value;
-        totalCreationFees = rewardFee+liquidityFee+treasuryFee;
-    }
 
     /** 
         @param value : The new fee to be taken at each user claim 
@@ -297,6 +285,8 @@ contract Mountain is ARC20, MountainRewardManager {
         sellFee = value; 
     }  
 
+
+    // TODO : To be removed (if there are no difference between sell and transfer fee)
     /** 
         @param value : The new fee to be taken at each user node transfer 
         @notice The max value for 100% is 1_000, i.e. 100 is 10%
@@ -312,7 +302,8 @@ contract Mountain is ARC20, MountainRewardManager {
         @notice The max value for 100% is 1_000, i.e. 100 is 10%
     */     
     function updateRewardSwapRatio(uint32 value) external onlyOwner { 
-        rewardSwapRatio = value; 
+        rewardSwapRatio = value;
+        require(rewardSwapRatio<=PER_MILLE, "Update swap ratio : new value is higher than 1_000");
     }
 
 
@@ -366,6 +357,7 @@ contract Mountain is ARC20, MountainRewardManager {
 		_mint(rewardPool, amount);
 	}
 
+
     // Note : Defined in PaymentSplitter, if we use it, remove this function
     receive() external payable {}
 
@@ -389,36 +381,48 @@ contract Mountain is ARC20, MountainRewardManager {
         
         uint256 amountToTransfer = amount;
 
-        require(from != address(0), "ARC20: transfer from the zero address");
-        require(to != address(0), "ARC20: transfer to the zero address"); 
+
         require(!_isBlacklisted[from] && !_isBlacklisted[to], "Blacklisted address");
 
 		if (!isMTNAddress(from) && !isMTNAddress(to)) {
 
             
 		 	if (tradingOpen) {
-		 		uint256 walletBalance = balanceOf(address(to));
-                if (!isMTNAddress(to)) {             
-		 		    require(amount + walletBalance <= maxWallet, "Transfer amount too high");
-                }
+                
                 require(amount <= maxTx, 'Transaction Limit Exceeded');
+
+                if (traderJoePair!=to) {      // Note update : useless since we are in a if        
+		 		    require(amount + balanceOf(address(to)) <= maxWallet, "Transfer amount too high");
+                }
+
 		 	}
 
 			if (!tradingOpen && from == traderJoePair) {
-		 		_isBlacklisted[to] = true;
+
+		 		_isBlacklisted[to] = true;  
+                //return false; // User is blacklisted and won't buy tokens
+
 		 	}
 
 
-            if(from != traderJoePair) {
+            if(tradingOpen && from != traderJoePair) { // Note : added tradingOpen because timestamps need to be set
                amountToTransfer = takeSellFee(from, amount);
             }
 		}
 
-       
-        _balances[from] = _balances[from] - amountToTransfer;
-        _balances[to] = _balances[to] + amountToTransfer;
+        return _basic_transfer(from, to, amountToTransfer);
 
-        emit Transfer(from, to, amountToTransfer);
+    }
+
+    function _basic_transfer(address from, address to, uint256 amount) internal returns (bool){
+
+        require(from != address(0), "ARC20: transfer from the zero address");
+        require(to != address(0), "ARC20: transfer to the zero address");         
+        
+        _balances[from] = _balances[from] - amount;
+        _balances[to] = _balances[to] + amount;
+
+        emit Transfer(from, to, amount);
         return true;
     }
 
@@ -429,14 +433,16 @@ contract Mountain is ARC20, MountainRewardManager {
 
         if(block.timestamp < endSellFeeTimestamp) {
             feeAmount += ((amount * initialAdditionnalSellFee * 
-                                    (TWO_DAYS - (block.timestamp - launchSellFeeTimestamp))) / (TWO_DAYS))
-                                    / PER_MILLE;
+                                    (TWO_DAYS - (block.timestamp - launchSellFeeTimestamp)) / (TWO_DAYS))
+                                    / PER_MILLE);
         }
 
-        _balances[rewardPool] += feeAmount;
+
+        _balances[address(this)] += feeAmount;
         _balances[sender] -= feeAmount;
         
-        emit Transfer(sender, rewardPool, feeAmount);
+        // TODO : Check if the transfer is to the SC or the reward pool ?
+        emit Transfer(sender, address(this), feeAmount);
 
         return amount - feeAmount;
     }
@@ -487,7 +493,7 @@ contract Mountain is ARC20, MountainRewardManager {
             tokenAmount,
             0, // slippage is unavoidable
             0, // slippage is unavoidable
-            liquidityPool,
+            lpPool,
             block.timestamp
         );
     }
@@ -558,17 +564,19 @@ contract Mountain is ARC20, MountainRewardManager {
         uint256 rewardsTokenstoSwap = rewardsPoolTokens * rewardSwapRatio / PER_MILLE;
 
         swapAndSendToPool(rewardPool, rewardsTokenstoSwap);
-        _transfer(address(this),rewardPool, rewardsPoolTokens-rewardsTokenstoSwap);
+        _transfer(address(this), rewardPool, rewardsPoolTokens-rewardsTokenstoSwap);
+   
 
         // Swap half of some tokens and add liquidity
         uint256 swapTokens = contractTokenBalance * liquidityFee / PER_MILLE;
         swapAndLiquify(swapTokens);
 
+
         // Swap the rest to Avax and send it to the team Pool
         swapAndSendToPool(teamPool, balanceOf(address(this)));
 
         // // Swap the rest to Avax and keep it in this SC (Old classical way, using payment splitter)
-        // swapTokensForAvax(balanceOf(address(this)));        
+        //swapTokensForAvax(balanceOf(address(this)));        
 
     }
 
@@ -580,7 +588,7 @@ contract Mountain is ARC20, MountainRewardManager {
         @dev This function handles the node creation, by calling the nodeRewardManager, 
              and all the transfers to the different pools when there is enough tokens in the contract
     */  
-    function createNodeAndTransferToPools(uint256 amount, uint256 nodeType, bytes20 referral_code) public returns (bytes20) {
+    function createNodeAndTransferToPools(uint256 amount, uint256 nodeType, bytes20 referral_code) public {
 
 
         address sender = _msgSender();
@@ -599,7 +607,7 @@ contract Mountain is ARC20, MountainRewardManager {
         }
 
 
-        bytes20 referral_code_sender = super.createNode(amount, nodeType);
+        super.createNode(amount, nodeType);
 
        // If the sender is whitelisted he can create a free node
         if (_isWhitelisted[sender]) {
@@ -617,15 +625,14 @@ contract Mountain is ARC20, MountainRewardManager {
                 uint256 amount_to_referral = referral_bonus * amount_to_reward_pool / PER_MILLE;
                 amount_to_reward_pool -= amount_to_referral;
 
-                // Send 5% of the amount to the referral
-                _transfer(_msgSender(), referral, amount_to_referral);
+                // Send 5% of the amount to the referral (Use _basic_transfer to avoid the transfer fee)
+                _basic_transfer(_msgSender(), referral, amount_to_referral);
+
             }
 
             // TODO: add a require balance ?x
             _transfer(_msgSender(), address(this), amount_to_reward_pool);  
         }   
-
-        return referral_code_sender;
 
     }    
 
