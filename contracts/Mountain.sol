@@ -5,7 +5,6 @@ pragma solidity ^0.8.11;
 
 import "./ARC20.sol";
 import "./IARC20.sol";
-import "./PaymentSplitter.sol";
 import "./Context.sol";
 import "./ITraderJoeFactory.sol";
 import "./ITraderJoeRouter.sol";
@@ -45,7 +44,7 @@ contract Mountain is ARC20, MountainRewardManager {
     address public treasuryPool;
     address public rewardPool; 
     address public teamPool; 
-    address public lpPool; // Todo: do we need an address for the LP tokens ? 
+    address public lpPool; 
 
 	mapping(address => bool) private _isPool;
 
@@ -67,7 +66,6 @@ contract Mountain is ARC20, MountainRewardManager {
     uint32 public rewardFee = 750; // 75%
     uint32 public treasuryFee = 100; // 10% 
     uint32 public teamFee = 50; // 5% 
-    uint32 public totalCreationFees = liquidityFee + rewardFee + treasuryFee + teamFee;
 
     uint32 public rewardSwapRatio = 25; // 2.5%  Note : a bit of AVAX if necessary
 
@@ -97,8 +95,9 @@ contract Mountain is ARC20, MountainRewardManager {
     address public traderJoePair;
 
     //address private traderJoeRouterAddress = 0x60aE616a2155Ee3d9A68541Ba4544862310933d4; // TraderJoe MainNet
-    address private traderJoeRouterAddress = 0x5db0735cf88F85E78ed742215090c465979B5006; // TraderJoe testnet TODO : change this
-    
+    //address private traderJoeRouterAddress = 0x5db0735cf88F85E78ed742215090c465979B5006; // TraderJoe testnet 
+    address private traderJoeRouterAddress = 0x2D99ABD9008Dc933ff5c0CD271B88309593aB921; // Pangolin testnet
+ 
 
     bool public swapping = false;
 
@@ -109,26 +108,32 @@ contract Mountain is ARC20, MountainRewardManager {
 
     /* Before transferring tokens/Avax to the pools, the min num of tokens accumulated with the fees needs
        to be at least equal to swapTokensAmount. */     
-    uint256 public swapTokensAmount = 100 * (10 ** _decimals); // TODO : define with the team    
+    uint256 public swapTokensAmount = 100 * (10 ** _decimals); // TODO : check with the other projects    
 
     // Max tokens per tx and per wallet
     uint256 private maxTx = 500 * (10 ** _decimals);
     uint256 private maxWallet = 4_000 * (10 ** _decimals);
 
-   	bool private tradingOpen = false; // TODO : Need set it to true before launching (set to true for testing purposes)
+   	bool private tradingOpen = false; // TODO : Need set it to false before launching 
 
-    // List of blacklisted malicious addresses (opportunists that try to buy before trading actually opened)
+    // List of blacklisted malicious addresses (opportunists that try to buy before trading actually started)
     mapping(address => bool) public _isBlacklisted;
 
     // Mapping for whitelisted to create a free node
     mapping(address => bool) public _isWhitelisted; 
 
+
     //-----------------------------------------------------\\
     //----------- Presale variables -----------------------\\
     //-----------------------------------------------------\\   
 
+
     IARC20 presaleToken;
     uint256 presaleMax = 1500*10**18;
+
+    // The exclusive node is the node that can be bought only with the tokens of the presale
+    uint256 exclusiveNodePrice = 50*10*18;
+
 
     //-----------------------------------------------------\\
     //----------- Events and modifiers --------------------\\
@@ -152,7 +157,7 @@ contract Mountain is ARC20, MountainRewardManager {
         // Instantiate a TraderJoe router with current address traderJoeRouterAddress
         traderJoeRouter = ITraderJoeRouter(traderJoeRouterAddress);
 
-        // Create a TraderJoe pair for MTN token
+        // Create a TraderJoe pair for the MTN token (with AVAX)
         traderJoePair = ITraderJoeFactory(traderJoeRouter.factory()).createPair(address(this), traderJoeRouter.WAVAX()); 
 
      
@@ -195,11 +200,12 @@ contract Mountain is ARC20, MountainRewardManager {
         _isBlacklisted[account] = value;
     }  
 
+
     /** 
         @param account : The address to be whitelisted or not
         @param value   : boolean to set the address to the whitelist or not
     */
-    function whitelisteUser(address account, bool value) external onlyOwner { 
+    function whitelistUser(address account, bool value) external onlyOwner { 
         _isWhitelisted[account] = value;
     }        
     
@@ -263,9 +269,9 @@ contract Mountain is ARC20, MountainRewardManager {
         liquidityFee = _liquidityFee;
         teamFee = _teamFee;
 
-        totalCreationFees = rewardFee+liquidityFee+treasuryFee+teamFee;
 
-        require(totalCreationFees==PER_MILLE, "Update Fee: The sum of all fees is not equal to 1_000");
+        require((liquidityFee + rewardFee + treasuryFee + teamFee) == PER_MILLE, 
+                "Update Fee: The sum of all fees is not equal to 1_000 (100%)");
     }
 
 
@@ -526,6 +532,7 @@ contract Mountain is ARC20, MountainRewardManager {
         );
     }    
 
+
     /** 
         @param destination : The address of the pool where the AVAX are sent
         @param tokens      : The amount of tokens to be swapped to AVAX
@@ -580,6 +587,29 @@ contract Mountain is ARC20, MountainRewardManager {
 
     }
 
+    /**         
+        @dev This function handles the exclusive node creation, by calling the nodeRewardManager function
+    */  
+    function createExclusiveNode() public {
+
+        address sender = _msgSender();
+
+        require(sender != address(0), "NODE CREATION: from the 0 address");
+        require(!_isBlacklisted[sender], "NODE CREATION: Blacklisted address");
+        require(!isMTNAddress(sender), "NODE CREATION: Pools, SC and owner cannot create nodes");
+
+        require(address(presaleToken) != address(0), "Presale token not set");
+        uint256 balance = presaleToken.balanceOf(msg.sender);
+        require(balance>=exclusiveNodePrice, "Doesn't have enough funds");
+
+        uint256 exclusiveNodeType = 3;
+        
+        super.createNode(exclusiveNodePrice, exclusiveNodeType);
+
+        presaleToken.transferFrom(msg.sender, address(this), exclusiveNodePrice);
+
+    }
+
     /** 
         @param amount : The amount of tokens needed for the node creation 
         @param nodeType : The node type (Lava, Earth or Snow). Should be a uint between 0 and 2.
@@ -596,8 +626,8 @@ contract Mountain is ARC20, MountainRewardManager {
                 "NODE CREATION: from the 0 address");
         require(!_isBlacklisted[sender], 
                 "NODE CREATION: Blacklisted address");
-        require(sender != treasuryPool && sender != rewardPool,
-                "NODE CREATION: Pools cannot create nodes");
+        require(!isMTNAddress(sender),
+                "NODE CREATION: Pools, SC and owner cannot create nodes");
 
 
         uint256 contractTokenBalance = balanceOf(address(this));
@@ -615,15 +645,15 @@ contract Mountain is ARC20, MountainRewardManager {
         }
         else {
 
-            uint256 amount_to_reward_pool = amount;
+            uint256 amount_to_sc = amount;
 
             // Get the address of the referral (if no referral code => 0 address) 
             address referral = getAddressFromReferral[referral_code];
 
             if (referral != address(0)) {
 
-                uint256 amount_to_referral = referral_bonus * amount_to_reward_pool / PER_MILLE;
-                amount_to_reward_pool -= amount_to_referral;
+                uint256 amount_to_referral = referral_bonus * amount_to_sc / PER_MILLE;
+                amount_to_sc -= amount_to_referral;
 
                 // Send 5% of the amount to the referral (Use _basic_transfer to avoid the transfer fee)
                 _basic_transfer(_msgSender(), referral, amount_to_referral);
@@ -631,7 +661,7 @@ contract Mountain is ARC20, MountainRewardManager {
             }
 
             // TODO: add a require balance ?x
-            _transfer(_msgSender(), address(this), amount_to_reward_pool);  
+            _transfer(_msgSender(), address(this), amount_to_sc);  
         }   
 
     }    
@@ -651,8 +681,8 @@ contract Mountain is ARC20, MountainRewardManager {
                 "CLAIM REWARD: from the 0 address");
         require(!_isBlacklisted[sender], 
                 "CLAIM REWARD: Blacklisted address");
-        require(sender != treasuryPool && sender != rewardPool,
-                "CLAIM REWARD: Pools cannot claim rewards");
+        require(!isMTNAddress(sender),
+                "CLAIM REWARD: Pools, SC and owner cannot claim rewards");
 
         // Uses the nodeRewardManager to get the amount for reward for the node of given id
         uint256 node_reward = super.getNodeReward(id);
@@ -676,8 +706,8 @@ contract Mountain is ARC20, MountainRewardManager {
                 "CLAIM REWARD: from the 0 address");
         require(!_isBlacklisted[sender], 
                 "CLAIM REWARD: Blacklisted address");
-        require(sender != treasuryPool && sender != rewardPool,
-                "CLAIM REWARD: Pools cannot claim rewards");
+        require(!isMTNAddress(sender),
+                "CLAIM REWARD: Pools, SC and owner cannot claim rewards");
 
         // Uses the nodeRewardManager to get the amount for all rewards for the nodes of the sender
         uint256 node_reward = super.getAllReward();
@@ -704,6 +734,9 @@ contract Mountain is ARC20, MountainRewardManager {
         require(balance > 0 && balance <= presaleMax, "Invalid balance");
 
         presaleToken.transferFrom(msg.sender, address(this), balance);
+
+        // TODO : Maybe need to remove this (since a part of the tokens are vested)
+        // TODO : Rethink this function w.r.t the presale contract
         require(presaleToken.balanceOf(msg.sender) == 0, "Error with conversion");
         
         _mint(msg.sender, balance);

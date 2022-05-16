@@ -22,16 +22,18 @@ contract MountainRewardManager is Ownable {
     struct MountainNode {
         uint256 id;        // The unique identifier of the node
         uint256 timestamp; // The creation time or the last claim time
-        uint256 nodeType;  // 0: Ice, 1: Earth, 2: Lava
+        uint256 nodeType;  // 0: Ice, 1: Earth, 2: Lava, 3: Exclusive
         address owner;     // The address of the node owner 
     }
 
-    // The prices of the Ice, the Earth and the Lava nodes
-    uint256[3] public nodePrice = [10 * 10**18, 15* 10**18, 20* 10**18];
+    // The prices of the Ice, the Earth, the Lava and the exclusive nodes
+    uint256[4] public nodePrice = [10 * 10**18, 15* 10**18, 20* 10**18, 50*10*18];
 
-    // The daily rewards of the Lava, the earth and the Snow nodes (0.8%, 1%, 1.2%) 
-    // TODO : add the exclusif node
-    uint256[3] public dailyReward = [8, 10, 12];
+    // The daily rewards of the Lava, the earth and the Snow nodes (0.8%, 1%, 1.2% and 2%) 
+    uint256[4] public dailyReward = [8, 10, 12, 20];
+
+    // Daily boost for the first two days with an exclusive node
+    uint256 public dailyBoost = 20;
 
     // Instead of percentages we use per mille, so that we can have one decimal percentages
     uint256 constant PER_MILLE = 1000;
@@ -44,17 +46,22 @@ contract MountainRewardManager is Ownable {
     mapping(address => bytes20) private referrals;
 
     // Mapping that allows to retrive the address of a user from the referral id
-    mapping(bytes20 => address) public getAddressFromReferral;    // Note : for testing purposes only => internal
+    mapping(bytes20 => address) internal getAddressFromReferral;    // Note : make it public for tests
 
     // Mapping that stores the Node structure for given node identifiers
     mapping(uint256 => MountainNode) public nodeMapping;
 
     // Is the creation of nodes enabled 
-    bool public nodeCreationEnabled = true;
+    bool public nodeCreationEnabled = true; // Note : True for tests
+
+    // Enables reward claims
+    bool public nodeRewardEnabled = true;   // Note : True for tests 
 
 
     constructor() {}
    
+
+
 
     /** 
         @param _amount : The amount corresponding to the price of a the node  
@@ -69,8 +76,8 @@ contract MountainRewardManager is Ownable {
 
         // Revert if the node creation hasn't been enabled yet
         require(nodeCreationEnabled, "Node creation is disabled");
-        // Revert if the node type isn't in the list (between 0 and 2)
-        require(_nodeType >= 0 && _nodeType <= 2, "Node type is invalid");
+        // Revert if the node type isn't in the list (between 0 and 3)
+        require(_nodeType >= 0 && _nodeType <= 3, "Node type is invalid");
         // Revert if the amount sent doesn't match the price of the node
         require(_amount == nodePrice[_nodeType], "Node amount not correct");
         
@@ -126,6 +133,9 @@ contract MountainRewardManager is Ownable {
     */ 
     function getAllReward() internal returns(uint256) {
 
+        // Revert if the node reward claim hasn't been enabled yet
+        require(nodeRewardEnabled, "Node reward claim hasn't been enabled yet");        
+
         address sender = _msgSender();
         
         // Retrieve the number of nodes of the caller
@@ -149,6 +159,9 @@ contract MountainRewardManager is Ownable {
         @dev This is the main function to get reward of node given its NodeId, before transferring to the owner
     */ 
     function getNodeReward(uint256 _id) internal returns(uint256){
+
+        // Revert if the node reward claim hasn't been enabled yet
+        require(nodeRewardEnabled, "Node reward claim hasn't been enabled yet");          
 
         // Retrieve the Node structure given its id 
         MountainNode memory mountaintNode = nodeMapping[_id];
@@ -181,10 +194,17 @@ contract MountainRewardManager is Ownable {
         // Retrieve the Node structure given its id 
         MountainNode memory mountainNode = nodeMapping[_id];
 
+        uint256 dailyInterest = dailyReward[mountainNode.nodeType];
+        // Add an extra boost for the first two days for the exclusive node
+        if (mountainNode.nodeType == 3 && 
+            (block.timestamp - mountainNode.timestamp) < 2*ONE_DAY ) 
+        { 
+            dailyInterest+=dailyBoost;
+        }
 
-        // The formula to calculate the rewards is easy, and similar to staking SCs. 
+        // The formula to calculate the rewards is simple, and similar to staking SCs. 
         // It corresponds to the node price * daily interest * days elapsed
-        return (( (nodePrice[mountainNode.nodeType] * dailyReward[mountainNode.nodeType]) / PER_MILLE)
+        return (( (nodePrice[mountainNode.nodeType] * dailyInterest) / PER_MILLE)
                                   * (block.timestamp - mountainNode.timestamp) / ONE_DAY);
     }
 
