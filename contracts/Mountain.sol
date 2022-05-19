@@ -152,7 +152,7 @@ contract Mountain is ARC20, MountainRewardManager {
 
 
 
-   constructor(address[] memory addresses) ARC20(_symbol, _name)  {
+   constructor(address[] memory addresses) ARC20(_name, _symbol)  {
 
         // Instantiate a TraderJoe router with current address traderJoeRouterAddress
         traderJoeRouter = ITraderJoeRouter(traderJoeRouterAddress);
@@ -395,7 +395,7 @@ contract Mountain is ARC20, MountainRewardManager {
             
 		 	if (tradingOpen) {
                 
-                require(amount <= maxTx, 'Transaction Limit Exceeded');
+                require(amount <= maxTx, "Transaction Limit Exceeded");
 
                 if (traderJoePair!=to) {      // Note update : useless since we are in a if        
 		 		    require(amount + balanceOf(address(to)) <= maxWallet, "Transfer amount too high");

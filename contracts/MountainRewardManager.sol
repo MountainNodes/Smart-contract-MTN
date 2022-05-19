@@ -30,9 +30,9 @@ contract MountainRewardManager is Ownable {
     uint256[4] public nodePrice = [10 * 10**18, 15* 10**18, 20* 10**18, 50*10*18];
 
     // The daily rewards of the Lava, the earth and the Snow nodes (0.8%, 1%, 1.2% and 2%) 
-    uint256[4] public dailyReward = [8, 10, 12, 20];
+    uint256[4] public dailyReward = [8, 10, 12, 15];
 
-    // Daily boost for the first two days with an exclusive node
+    // Daily boost for the first two days with an exclusive node (2%)
     uint256 public dailyBoost = 20;
 
     // Instead of percentages we use per mille, so that we can have one decimal percentages
@@ -118,11 +118,10 @@ contract MountainRewardManager is Ownable {
 
 
     /** 
-        @param user : The address of the user
-        @return  bytes20 : The referral code for the address 
+        @dev This function returns the referral code of the sender
     */ 
-    function getReferralCode(address user) external view onlyOwner returns(bytes20) { 
-        return referrals[user];
+    function getReferralCode() external view  returns(bytes20) { 
+        return referrals[_msgSender()];
     }
 
 
@@ -130,8 +129,9 @@ contract MountainRewardManager is Ownable {
 
     /**    
         @dev This is the main function to get all rewards before transferring to the owner
+        @notice This function was made public
     */ 
-    function getAllReward() internal returns(uint256) {
+    function getAllReward() public returns(uint256) {
 
         // Revert if the node reward claim hasn't been enabled yet
         require(nodeRewardEnabled, "Node reward claim hasn't been enabled yet");        
@@ -157,8 +157,9 @@ contract MountainRewardManager is Ownable {
         @param _id : The identifier of the node that the owner wants to get rewards from.  
         
         @dev This is the main function to get reward of node given its NodeId, before transferring to the owner
+        @notice This function was made public
     */ 
-    function getNodeReward(uint256 _id) internal returns(uint256){
+    function getNodeReward(uint256 _id) public returns(uint256){
 
         // Revert if the node reward claim hasn't been enabled yet
         require(nodeRewardEnabled, "Node reward claim hasn't been enabled yet");          
@@ -236,6 +237,13 @@ contract MountainRewardManager is Ownable {
     function setNodeCreation(bool enableNodeCreation) external onlyOwner { 
         nodeCreationEnabled = enableNodeCreation;
     }
+
+    /** 
+        @dev Utility function to get all ids for a given address  
+    */ 
+    function getAccountNodes() public view returns (uint256[] memory) {
+            return accountNodes[msg.sender];
+    }    
 
 
 
